@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Al-Qutūfud Daaniyah — Admin Dashboard</title>
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f1e7;color:#173b2b}
+.wrap{max-width:520px;margin:40px auto;padding:20px}
+.card{background:#fff;border-radius:18px;padding:26px;box-shadow:0 8px 30px #0001}
+.logo{width:80px;height:80px;object-fit:contain;display:block;margin:0 auto 12px}
+h1{text-align:center;font-size:25px;margin:5px 0 4px}
+p.sub{text-align:center;color:#667;margin:0 0 22px}
+label{display:block;font-weight:700;margin:13px 0 6px}
+input{width:100%;box-sizing:border-box;padding:13px;border:1px solid #ccd5cf;border-radius:9px;font-size:16px}
+button{width:100%;padding:13px;border:0;border-radius:9px;background:#d8a928;color:#173b2b;font-weight:700;font-size:16px;margin-top:16px}
+.msg{display:none;margin-top:15px;padding:12px;border-radius:9px;white-space:pre-wrap;word-break:break-word;font-size:14px}
+.info{background:#eef5f1}.ok{background:#e7f6e9;color:#17652a}.err{background:#fdeaea;color:#9b1c1c}
+#app{display:none}.box{background:#f7faf8;padding:15px;border-radius:10px;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<img class="logo" src="logo.png" alt="Al-Qutūfud Daaniyah logo">
+<h1>Admin Login</h1>
+<p class="sub">Al-Qutūfud Daaniyah Online Quranic Academy</p>
+
+<div id="status" class="msg info" style="display:block">Starting JavaScript…</div>
+
+<section id="login">
+<form id="loginForm" novalidate>
+<label for="email">Email</label>
+<input id="email" type="email" autocomplete="username" required>
+<label for="password">Password</label>
+<input id="password" type="password" autocomplete="current-password" required>
+<button id="loginBtn" type="submit">Login to Dashboard</button>
+</form>
+</section>
+
+<section id="app">
+<h2>Welcome, Admin</h2>
+<div class="box">Admin authentication succeeded.</div>
+<button id="logoutBtn" type="button">Log Out</button>
+</section>
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function(){
+  const statusEl=document.getElementById('status');
+  const login=document.getElementById('login');
+  const app=document.getElementById('app');
+  const form=document.getElementById('loginForm');
+  const btn=document.getElementById('loginBtn');
+
+  function show(message,type='info'){
+    statusEl.textContent=message;
+    statusEl.className='msg '+type;
+    statusEl.style.display='block';
+  }
+
+  window.addEventListener('error',function(e){
+    show('JavaScript error:\\n'+(e.message||'Unknown error')+
+      '\\nFile: '+(e.filename||'unknown')+
+      '\\nLine: '+(e.lineno||'?'),'err');
+  });
+
+  window.addEventListener('unhandledrejection',function(e){
+    const r=e.reason;
+    show('Unhandled JavaScript error:\\n'+(r && r.message ? r.message : String(r)),'err');
+  });
+
+  show('JavaScript loaded. Checking Supabase…','info');
+
+  if(!window.supabase){
+    show('Supabase library did not load. The CDN script could not be reached.','err');
+    return;
+  }
+
+  show('Supabase library loaded. Creating client…','info');
+
+  const SUPABASE_URL='https://zyynqkjmovixppqxegfw.supabase.co';
+  const SUPABASE_KEY='sb_publishable_4qXKcia4HebqNYp28yfjlA_2jumr3-O';
+
+  let db;
+  try{
+    db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+  }catch(e){
+    show('Supabase client creation failed:\\n'+e.message,'err');
+    return;
+  }
+
+  show('Supabase client created. Ready for login.','ok');
+
+  async function checkAdmin(){
+    show('Login successful. Checking admin account…','info');
+    const {data:{session},error:sessionError}=await db.auth.getSession();
+    if(sessionError) throw sessionError;
+    if(!session){
+      show('No active session was returned after login.','err');
+      return;
+    }
+
+    const {data,error}=await db.from('admins')
+      .select('id,email')
+      .eq('id',session.user.id)
+      .maybeSingle();
+
+    if(error){
+      show('Admin table check failed:\\n'+error.message+
+        '\\nCode: '+(error.code||'none'),'err');
+      return;
+    }
+
+    if(!data){
+      show('Login succeeded, but this account is not found in the admins table.\\nAuth ID: '+session.user.id,'err');
+      await db.auth.signOut();
+      return;
+    }
+
+    login.style.display='none';
+    app.style.display='block';
+    show('Admin authentication and admin-table check succeeded.','ok');
+  }
+
+  form.addEventListener('submit',async function(e){
+    e.preventDefault();
+    e.stopPropagation();
+
+    const email=document.getElementById('email').value.trim();
+    const password=document.getElementById('password').value;
+
+    if(!email||!password){
+      show('Please enter both email and password.','err');
+      return;
+    }
+
+    btn.disabled=true;
+    btn.textContent='Signing in…';
+    show('Sending login request to Supabase…','info');
+
+    try{
+      const {data,error}=await db.auth.signInWithPassword({email,password});
+
+      if(error){
+        show('Supabase login failed:\\n'+error.message+
+          '\\nCode: '+(error.code||'none')+
+          '\\nStatus: '+(error.status||'none'),'err');
+        return;
+      }
+
+      if(!data || !data.session){
+        show('Supabase returned no session after login.','err');
+        return;
+      }
+
+      await checkAdmin();
+    }catch(e){
+      show('Login process error:\\n'+(e && e.message ? e.message : String(e)),'err');
+    }finally{
+      btn.disabled=false;
+      btn.textContent='Login to Dashboard';
+    }
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click',async function(){
+    await db.auth.signOut();
+    app.style.display='none';
+    login.style.display='block';
+    show('Logged out.','info');
+  });
+})();
+</script>
+</body>
+</html>
