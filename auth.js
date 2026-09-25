@@ -166,59 +166,6 @@ if (registerForm) {
 
     try {
       const { data, error } =
-        await supabaseClient.auth.signUp({
-          email,
-          password,
-
-          options: {
-            data: {
-              full_name: String(fd.get('full_name') || ''),
-              phone: String(fd.get('phone') || ''),
-              country: String(fd.get('country') || ''),
-              programme: String(fd.get('programme') || '')
-            },
-
-            emailRedirectTo: dashboardUrl()
-          }
-        });
-
-      if (error) throw error;
-
-      /*
-        FIX:
-        Use the saved "form" variable instead of
-        e.currentTarget after the await.
-      */
-      if (form) {
-        form.reset();
-      }
-
-      if (data.session) {
-
-        window.location.replace(dashboardUrl());
-
-      } else {
-
-        message(
-          'Account created. If email confirmation is enabled, confirm your email first, then return to Student Login.',
-          true
-        );
-      }
-
-    } catch (err) {
-      console.error(err);
-
-      message(
-        err.message ||
-        'Unable to create the account.'
-      );
-
-    } finally {
-      busy(btn, false);
-    }
-  });
-}
-
 
 /* =========================
    LOAD STUDENT CLASSES
