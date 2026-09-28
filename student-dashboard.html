@@ -28,6 +28,10 @@
   .student-page .class-card .btn,.student-page .class-card .muted{display:inline-block;margin-top:14px;}
   .student-page .dashboard-head h1{font-size:clamp(1.65rem,7vw,2.2rem);line-height:1.2;}
 }
+
+.student-page .class-reminder{margin:0 0 18px;padding:14px 16px;border-radius:14px;border:1px solid rgba(215,170,61,.35);background:#fff8e8;}
+.student-page .class-reminder strong{display:block;margin-bottom:4px;}
+.student-page .class-countdown{font-weight:600;}
 </style>
 </head><body class="student-page"><header class="site-header"><div class="container nav-wrap"><a class="brand" href="index.html"><img src="logo.png" alt="Al-Qutūfud Daaniyah logo"><span><strong>Al-Qutūfud Daaniyah</strong><small>Student Portal</small></span></a><div class="student-nav"><a href="index.html" class="back-home">← Public Website</a><button id="logoutBtn" class="btn secondary" type="button">Log Out</button></div></div></header><main class="student-main"><div class="container"><div id="topNotification" class="top-notification" role="status" aria-live="polite" hidden><div class="notification-icon">✓</div><div class="notification-copy"><strong id="notificationTitle">Welcome back!</strong><span id="notificationText">Your student dashboard is ready.</span></div><button id="closeNotification" class="notification-close" type="button" aria-label="Close notification">×</button></div><section id="dashboard" class="dashboard-page" hidden><div class="dashboard-head"><div><span class="eyebrow">STUDENT DASHBOARD</span><h1>Assalamu Alaikum, <span id="studentName">Student</span></h1><p id="studentEmail"></p></div></div><div class="dashboard-cards"><div class="dash-card"><span>My Programme</span><strong id="studentProgramme">Programme to be confirmed</strong></div><div class="dash-card"><span>Learning</span><strong>Qur’an • Tajweed • Islamic Studies</strong></div></div><div class="portal-subheading"><span class="eyebrow">MY CLASSES</span><h2>Upcoming Classes</h2><p>Your tutor's scheduled classes will appear here.</p></div><div id="classesList" class="classes-list"></div><div class="student-tools"><article class="student-portal-card"><span>Learning Materials</span><h3>Notes & Lesson Resources</h3><div id="materialsList"><p class="muted">Loading learning materials…</p></div></article><article><span>My Progress</span><h3>Progress Report</h3><div id="progressList"><p class="muted">Loading progress…</p></div></article><article><span>Attendance</span><h3>My Attendance</h3><div id="attendanceList"><p class="muted">Loading attendance…</p></div></article><article class="student-portal-card"><span>Payment Status</span><h3>My Payments</h3><div id="paymentList"><p class="muted">Loading payment status…</p></div></article><article><span>My Profile</span><h3>Student Details</h3><div id="profileDetails"><p class="muted">Loading profile…</p></div></article></div><div class="dashboard-quote"><div class="arabic">رَبِّ زِدْنِي عِلْمًا</div><span>My Lord, increase me in knowledge.</span></div></section><div id="dashboardError" class="empty-card" hidden><strong>We couldn't open your dashboard.</strong><p id="dashboardErrorText">Please return to the login page and try again.</p><a class="btn primary" href="student-login.html">Return to Student Login</a></div></div></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="supabase-config.js?v=11"></script><script src="auth.js?v=11"></script><script>
 /* Additional student portal data: Learning Materials and Payment Status.
@@ -141,4 +145,89 @@
     startStudentExtras();
   }
 })();
-</script></body></html>
+</script>
+<script>
+/* Upcoming-class and reminder enhancement. It does not replace authentication or the existing portal data features. */
+(function(){
+  const SUPABASE_URL='https://zyynqkjmovixppqxegfw.supabase.co';
+  const SUPABASE_KEY='sb_publishable_4qXKcia4HebqNYp28yfjlA_2jumr3-O';
+  const q=id=>document.getElementById(id);
+  const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const fmt=v=>new Date(v).toLocaleString([], {dateStyle:'medium',timeStyle:'short'});
+  const db2=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+  let reminderTimer=null;
+
+  function notifyStudent(title,text){
+    const box=document.createElement('div');
+    box.className='class-reminder';
+    box.innerHTML='<strong>'+safe(title)+'</strong><span>'+safe(text)+'</span>';
+    const list=q('classesList');
+    if(list) list.parentNode.insertBefore(box,list);
+    if('Notification' in window && Notification.permission==='granted'){
+      try{new Notification(title,{body:text});}catch(e){}
+    }
+  }
+
+  async function requestNotifications(){
+    if(!('Notification' in window)) return;
+    if(Notification.permission==='default'){
+      try{await Notification.requestPermission();}catch(e){}
+    }
+  }
+
+  function scheduleReminder(cls){
+    const start=new Date(cls.start_time).getTime();
+    const reminderAt=start-30*60*1000;
+    const delay=reminderAt-Date.now();
+    const key='qutuf-reminded-'+cls.id;
+    if(delay<=0 && delay>-5*60*1000 && !localStorage.getItem(key)){
+      localStorage.setItem(key,'1');
+      notifyStudent('Class reminder',`${cls.title} starts in about 30 minutes.`);
+      return;
+    }
+    if(delay>0 && delay<2147483647){
+      setTimeout(()=>{
+        if(!localStorage.getItem(key)){
+          localStorage.setItem(key,'1');
+          notifyStudent('Class reminder',`${cls.title} starts in about 30 minutes.`);
+        }
+      },delay);
+    }
+  }
+
+  async function loadUpcomingEnhanced(){
+    try{
+      const {data:{session},error:se}=await db2.auth.getSession();
+      if(se||!session) return;
+      const now=new Date().toISOString();
+      const {data,error}=await db2.from('classes').select('id,title,programme,start_time,duration_minutes,zoom_link,tutor,is_recurring,recurrence_group_id').eq('student_id',session.user.id).gte('start_time',now).order('start_time',{ascending:true}).limit(30);
+      if(error) throw error;
+      const list=q('classesList'); if(!list) return;
+      if(reminderTimer) clearInterval(reminderTimer);
+      document.querySelectorAll('.class-reminder').forEach(x=>x.remove());
+      if(!data?.length){
+        list.innerHTML='<div class="empty-card"><strong>No upcoming classes scheduled.</strong><p>Your tutor will add your next class to your dashboard.</p></div>';
+        return;
+      }
+      list.innerHTML=data.map(c=>{
+        const link=(c.zoom_link||'').trim(),url=/^https?:\/\//i.test(link);
+        return `<article class="class-card card"><div><span class="eyebrow">${safe(c.programme||'CLASS')}</span><h4>${safe(c.title)}</h4><p>${safe(fmt(c.start_time))}${c.duration_minutes?` · ${safe(c.duration_minutes)} minutes`:''}</p>${c.tutor?`<p>Tutor: ${safe(c.tutor)}</p>`:''}${c.is_recurring?'<p class="muted">Weekly recurring class</p>':''}${link&&!url?`<p class="muted">Class access: ${safe(link)}</p>`:''}</div>${url?`<a class="btn primary" href="${safe(link)}" target="_blank" rel="noopener">Join Class</a>`:''}</article>`;
+      }).join('');
+      data.forEach(scheduleReminder);
+      // Refresh the countdown/reminder state every minute while the dashboard is open.
+      reminderTimer=setInterval(()=>{
+        const upcoming=data.find(c=>new Date(c.start_time).getTime()>Date.now());
+        if(upcoming) scheduleReminder(upcoming);
+      },60000);
+    }catch(e){console.error('Upcoming classes enhancement:',e);}
+  }
+
+  async function start(){
+    await requestNotifications();
+    // Let the existing auth/dashboard boot complete first, then our enhanced class view takes over.
+    setTimeout(loadUpcomingEnhanced,900);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start,{once:true}); else start();
+})();
+</script>
+</body></html>
