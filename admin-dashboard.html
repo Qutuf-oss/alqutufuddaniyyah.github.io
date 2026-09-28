@@ -107,9 +107,28 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 <label>Class title</label><input id="classTitle" required placeholder="e.g. Tajweed Class">
 <label>Student</label><select id="classStudent" required></select>
 <label>Programme</label><input id="classProgramme" placeholder="e.g. Tahfizul Qur'an">
-<div class="formgrid">
-<div><label>Start time</label><input id="classTime" type="datetime-local" required></div>
-<div><label>Duration (minutes)</label><input id="classDuration" type="number" min="1" value="60"></div>
+<label>Class schedule</label>
+<select id="classRepeat">
+<option value="none">One-time class</option>
+<option value="weekly">Repeat weekly</option>
+</select>
+<div id="oneTimeFields">
+<div class="formgrid"><div><label>Start time</label><input id="classTime" type="datetime-local"></div><div><label>Duration (minutes)</label><input id="classDuration" type="number" min="1" value="60"></div></div>
+</div>
+<div id="weeklyFields" hidden>
+<div class="formgrid"><div><label>First class date</label><input id="classStartDate" type="date"></div><div><label>Last class date</label><input id="classEndDate" type="date"></div></div>
+<label>Class time</label><input id="classTimeOnly" type="time">
+<label>Days of the week</label>
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px">
+<label><input class="classDay" type="checkbox" value="1"> Mon</label>
+<label><input class="classDay" type="checkbox" value="2"> Tue</label>
+<label><input class="classDay" type="checkbox" value="3"> Wed</label>
+<label><input class="classDay" type="checkbox" value="4"> Thu</label>
+<label><input class="classDay" type="checkbox" value="5"> Fri</label>
+<label><input class="classDay" type="checkbox" value="6"> Sat</label>
+<label><input class="classDay" type="checkbox" value="0"> Sun</label>
+</div>
+<div class="formgrid"><div><label>Duration (minutes)</label><input id="classDurationWeekly" type="number" min="1" value="60"></div><div><label>Maximum occurrences</label><input id="classMaxOccurrences" type="number" min="1" max="100" value="52"></div></div>
 </div>
 <label>Zoom link or invite code</label><input id="classZoom" type="text" placeholder="Paste a URL, meeting ID, invite code, or any class access information">
 <label>Tutor</label><input id="classTutor" value="Al-Qutufud Daaniyah Academy">
@@ -266,7 +285,7 @@ async function loadClasses(){
   const {data,error}=await db.from('classes').select('*').order('start_time',{ascending:false});
   if(error){$('classesList').innerHTML='<div class="empty">'+esc(error.message)+'</div>';throw error}
   classes=data||[];$('classCount').textContent=classes.length;
-  $('classesList').innerHTML=classes.length?classes.map(c=>`<div class="card"><div class="cardhead"><div><div class="title">${esc(c.title)}</div><div class="meta">Student: ${esc((students.find(s=>s.id===c.student_id)||{}).full_name||'Unassigned')}<br>Programme: ${esc(c.programme||'—')}<br>Time: ${dateText(c.start_time)}<br>Duration: ${esc(c.duration_minutes||'—')} minutes<br>Tutor: ${esc(c.tutor||'—')}</div></div></div><div class="actions">${c.zoom_link?`<a class="btn" href="${esc(c.zoom_link)}" target="_blank" rel="noopener">Open Zoom</a>`:''}<button class="btn danger" onclick="deleteClass(${c.id})">Delete</button></div></div>`).join(''):'<div class="empty">No classes yet.</div>';
+  $('classesList').innerHTML=classes.length?classes.map(c=>`<div class="card"><div class="cardhead"><div><div class="title">${esc(c.title)}</div><div class="meta">Student: ${esc((students.find(s=>s.id===c.student_id)||{}).full_name||'Unassigned')}<br>Programme: ${esc(c.programme||'—')}<br>Time: ${dateText(c.start_time)}<br>Duration: ${esc(c.duration_minutes||'—')} minutes<br>Tutor: ${esc(c.tutor||'—')}${c.is_recurring?'<br>Schedule: Weekly recurring':''}</div></div></div><div class="actions">${c.zoom_link?`<a class="btn" href="${esc(c.zoom_link)}" target="_blank" rel="noopener">Open Zoom</a>`:''}${c.is_recurring&&c.recurrence_group_id?`<button class="btn danger" onclick="deleteSeries('${c.recurrence_group_id}')">Delete series</button>`:''}<button class="btn danger" onclick="deleteClass(${c.id})">Delete</button></div></div>`).join(''):'<div class="empty">No classes yet.</div>';
 }
 
 async function deleteClass(id){
@@ -276,21 +295,68 @@ async function deleteClass(id){
   appMsg('Class deleted.','ok');await loadClasses();populateClassSelect();
 }
 
+async function deleteSeries(groupId){
+  if(!confirm('Delete all classes in this recurring series?')) return;
+  const {error}=await db.from('classes').delete().eq('recurrence_group_id',groupId);
+  if(error){appMsg('Delete series failed: '+error.message,'err');return}
+  appMsg('Recurring class series deleted.','ok');await loadClasses();populateClassSelect();
+}
+
+function setScheduleMode(){
+  const weekly=$('classRepeat').value==='weekly';
+  $('oneTimeFields').hidden=weekly;$('weeklyFields').hidden=!weekly;
+  $('classTime').required=!weekly;$('classStartDate').required=weekly;$('classEndDate').required=weekly;$('classTimeOnly').required=weekly;
+  document.querySelectorAll('.classDay').forEach(x=>x.required=false);
+}
+$('classRepeat').addEventListener('change',setScheduleMode);setScheduleMode();
+
+function localDateTimeToIso(dateString,timeString){
+  return new Date(`${dateString}T${timeString}`).toISOString();
+}
+function buildWeeklyOccurrences(startDate,endDate,time,days,maxOccurrences){
+  const start=new Date(startDate+'T00:00:00');
+  const end=new Date(endDate+'T00:00:00');
+  const selected=new Set(days.map(Number));
+  const rows=[];
+  for(let d=new Date(start);d<=end && rows.length<maxOccurrences;d.setDate(d.getDate()+1)){
+    if(selected.has(d.getDay())){
+      const yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+      rows.push(localDateTimeToIso(`${yyyy}-${mm}-${dd}`,time));
+    }
+  }
+  return rows;
+}
+
 $('classForm').addEventListener('submit',async e=>{
   e.preventDefault();
-  const val=$('classTime').value;
-  const {error}=await db.from('classes').insert({
+  const repeat=$('classRepeat').value;
+  const common={
     title:$('classTitle').value.trim(),
     programme:$('classProgramme').value.trim()||null,
-    start_time:new Date(val).toISOString(),
-    duration_minutes:Number($('classDuration').value)||60,
     zoom_link:$('classZoom').value.trim()||null,
     tutor:$('classTutor').value.trim()||null,
     student_id:$('classStudent').value || null
-  });
+  };
+  let rows=[];
+  if(repeat==='weekly'){
+    const days=[...document.querySelectorAll('.classDay:checked')].map(x=>x.value);
+    const start=$('classStartDate').value,end=$('classEndDate').value,time=$('classTimeOnly').value;
+    const max=Math.min(100,Math.max(1,Number($('classMaxOccurrences').value)||52));
+    if(!start||!end||!time||!days.length){appMsg('For a recurring class, choose the date range, time and at least one day.','err');return}
+    if(new Date(start+'T00:00:00')>new Date(end+'T00:00:00')){appMsg('The last class date must be on or after the first class date.','err');return}
+    const occurrences=buildWeeklyOccurrences(start,end,time,days,max);
+    if(!occurrences.length){appMsg('No matching class dates were found. Check the days and date range.','err');return}
+    const groupId=crypto.randomUUID();
+    rows=occurrences.map(iso=>({...common,start_time:iso,duration_minutes:Number($('classDurationWeekly').value)||60,is_recurring:true,recurrence_group_id:groupId}));
+  }else{
+    const val=$('classTime').value;
+    if(!val){appMsg('Please choose the class start time.','err');return}
+    rows=[{...common,start_time:new Date(val).toISOString(),duration_minutes:Number($('classDuration').value)||60,is_recurring:false,recurrence_group_id:null}];
+  }
+  const {error}=await db.from('classes').insert(rows);
   if(error){appMsg('Could not add class: '+error.message,'err');return}
-  e.target.reset();$('classDuration').value=60;$('classTutor').value='Al-Qutufud Daaniyah Academy';
-  appMsg('Class added successfully.','ok');await loadClasses();populateClassSelect();
+  e.target.reset();$('classDuration').value=60;$('classDurationWeekly').value=60;$('classMaxOccurrences').value=52;$('classTutor').value='Al-Qutufud Daaniyah Academy';$('classRepeat').value='none';setScheduleMode();
+  appMsg(rows.length>1?`${rows.length} recurring classes added successfully.`:'Class added successfully.','ok');await loadClasses();populateClassSelect();
 });
 
 function populateStudentSelects(){
